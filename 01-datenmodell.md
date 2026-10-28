@@ -15,6 +15,13 @@ Status: lebend · Zuletzt geändert: 2026-10-28 · Gilt für Phasen 1–2
 - Autorennamen werden an Threads und Posts zusätzlich als `username` gespeichert, damit
   Inhalte gelöschter User lesbar bleiben (wie in XenForo).
 - Migrationen über `sqlx migrate`, niemals bestehende Migrationen ändern.
+- Fremdschlüssel auf `users`: von Inhalten (Threads, Posts, Anhänge, …) mit
+  `ON DELETE SET NULL`, damit Inhalte eine Kontolöschung überstehen (E9); von reinen
+  Kontodaten (Profil, Anmeldedaten, Sessions, Passkeys, …) mit `ON DELETE CASCADE`.
+- Secrets in der Datenbank (TOTP) werden mit einem Schlüssel verschlüsselt, der per HKDF aus
+  dem Instanz-Secret (`NEOFORO_SECRET_KEY`) abgeleitet ist. Gleiches gilt für HMAC-Schlüssel
+  (Bild-Proxy, signierte Links, Formular-Zeitstempel). Jeder Zweck bekommt einen eigenen
+  abgeleiteten Schlüssel.
 
 ## Phase 1 – Accounts
 
@@ -33,6 +40,8 @@ Status: lebend · Zuletzt geändert: 2026-10-28 · Gilt für Phasen 1–2
 | reaction_score | int | denormalisiert |
 | created_at | timestamptz | |
 | last_activity_at | timestamptz null | |
+| privacy_policy_version | int null | Zuletzt bestätigte Version der Datenschutzerklärung |
+| privacy_policy_accepted_at | timestamptz null | |
 
 Sperren (Bans) kommen in Phase 4 als eigene Tabelle, nicht als Flag am User.
 
@@ -77,6 +86,33 @@ Getrennt von `users`, damit Hashes nie versehentlich mitgeladen werden.
 Login: Schema auswählen → prüfen → bei Erfolg und `scheme != 'argon2id'` neu hashen und
 überschreiben.
 
+### `user_tfa`
+Zweiter Faktor per TOTP (E11). Höchstens ein TOTP pro Nutzer.
+
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| user_id | bigint PK → users | `ON DELETE CASCADE` |
+| secret_enc | bytea | Verschlüsselt (AEAD), siehe Konventionen |
+| last_used_step | bigint | Verhindert die Wiederverwendung eines Codes |
+| created_at | timestamptz | |
+
+### `user_recovery_codes`
+`id`, `user_id → users`, `code_hash bytea` (SHA-256), `used_at timestamptz null`,
+`created_at`. Bei Neuerzeugung werden alle alten Codes gelöscht.
+
+### `user_passkeys`
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| id | bigint | |
+| user_id | bigint → users | `ON DELETE CASCADE` |
+| credential_id | bytea unique | |
+| public_key | bytea | COSE-Schlüssel |
+| sign_count | bigint | |
+| transports | text[] | |
+| name | text | Vom Nutzer vergeben |
+| created_at | timestamptz | |
+| last_used_at | timestamptz null | |
+
 ### `user_groups`
 | Spalte | Typ |
 |---|---|
@@ -84,6 +120,7 @@ Login: Schema auswählen → prüfen → bei Erfolg und `scheme != 'argon2id'` n
 | title | text |
 | display_priority | int |
 | username_css_class | text null |
+| require_tfa | bool |
 
 Feste Systemgruppen (IDs wie in XenForo-Standardinstallationen): Gäste, Registriert,
 Administrator, Moderator.
@@ -182,6 +219,9 @@ mit ID und werden pro Request ersetzt. Externe Bild-URLs werden erst beim Auslie
 Bild-Proxy umgeschrieben, damit ein Wechsel des Proxy-Schlüssels den Cache nicht ungültig
 macht.
 
+IP-Adressen werden **nicht** an Posts gespeichert, sondern im `ip_log` mit
+Aufbewahrungsfrist (siehe E9 und Abschnitt Datenschutz und Spam).
+
 ### `polls`, `poll_responses`, `poll_votes`
 Für Threads mit `discussion_type = 'poll'`. Phase 2 zeigt Ergebnisse nur an, Abstimmen folgt
 in Phase 4.
@@ -212,9 +252,6 @@ Eigene BBCodes (siehe E1). Werden vom Renderer beim Start geladen. Eine Änderun
 Das Template wird beim Speichern gegen eine HTML-Whitelist geprüft (keine `script`-Tags,
 keine Event-Attribute, keine `style`-Attribute, URLs nur `http`/`https`).
 
-IP-Adressen werden **nicht** an Posts gespeichert, sondern in einer eigenen Tabelle mit
-Aufbewahrungsfrist (Phase 4, DSGVO).
-
 ### `attachment_data` und `attachments`
 Dedupliziert über den Inhalts-Hash.
 
@@ -237,6 +274,43 @@ Bereits jetzt festgelegt, damit das Schema dazu passt:
   (Vererbung vom Elternknoten abschneiden), wie in XenForo
 - `permission_cache`: berechnete effektive Rechte pro Gruppen-Kombination und Knoten
 
+## Datenschutz und Spam
+
+`ip_log` und `spam_log` kommen in Phase 1, weil die Registrierung die ersten Einträge
+schreibt. Die übrigen Tabellen folgen in Phase 4.
+
+### `ip_log`
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| id | bigint | |
+| user_id | bigint null → users | `ON DELETE CASCADE` |
+| ip | inet | |
+| action | text | `register`, `login`, `post`, `thread`, `edit`, … |
+| content_type, content_id | text null, bigint null | |
+| created_at | timestamptz | |
+
+Index auf `(user_id, created_at)` und `(ip)`. Ein Job löscht Einträge älter als die
+Aufbewahrungsfrist (Standard 30 Tage).
+
+### `spam_rules`
+`id`, `pattern text`, `is_regex bool`, `action` enum `moderate`/`reject`, `applies_to text[]`
+(`post`, `thread_title`, `signature`, `profile`), `active bool`, `created_at`
+
+### `spam_log`
+`id`, `user_id null → users (ON DELETE SET NULL)`, `action text` (`register`, `post`, …),
+`result` enum `allowed`/`moderated`/`rejected`, `reasons jsonb` (welche Prüfungen
+angeschlagen haben), `created_at`. Gleiche Aufbewahrungsfrist wie `ip_log`.
+
+### `spam_cleanups`
+`id`, `user_id`, `moderator_id`, `actions jsonb` (betroffene Inhalte mit vorherigem State,
+für das Rückgängigmachen), `created_at`, `undone_at timestamptz null`. Rückgängigmachen ist
+30 Tage lang möglich.
+
+### `data_exports`
+`id`, `user_id → users (ON DELETE CASCADE)`, `state` enum `pending`/`ready`/`failed`,
+`storage_key text null`, `created_at`, `expires_at`. Ein Job löscht abgelaufene Exporte
+samt Datei.
+
 ## Import-Infrastruktur (Phase 3)
 
 - `import_runs`: `id`, `source`, `started_at`, `finished_at`, `stats jsonb`, `report jsonb`
@@ -246,6 +320,5 @@ Bereits jetzt festgelegt, damit das Schema dazu passt:
 ## Offen
 
 - Präfixe, Tags, Lesemarkierungen, Abos, Ignorierlisten, Benachrichtigungen, Unterhaltungen,
-  Profilposts, Reaktionstypen, Votes für `suggestion`-Threads, Zwei-Faktor-Daten, verknüpfte
-  Konten: eigene Spec-Abschnitte vor der jeweiligen Phase. Der Importer muss diese Daten
-  übernehmen können (siehe Migrationsanforderungen in 00-vision).
+  Profilposts, Reaktionstypen, Votes für `suggestion`-Threads, verknüpfte Konten: eigene
+  Spec-Abschnitte vor der jeweiligen Phase. Der Importer muss diese Daten übernehmen können (siehe Migrationsanforderungen in 00-vision).

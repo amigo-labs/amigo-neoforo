@@ -17,30 +17,38 @@ Commits nach Conventional Commits. Code und Bezeichner Englisch, UI-Texte über 
 - [ ] `compose.yaml`: Postgres (aktuelle Major), Mailpit, MinIO (nur zum Testen des
       S3-Backends; Standard ist lokaler Storage)
 - [ ] Konfiguration über Umgebungsvariablen mit typisierter Config-Struct, `.env.example`
+- [ ] Instanz-Secret `NEOFORO_SECRET_KEY` (Pflicht, min. 32 Byte), zweckgebundene Schlüssel
+      per HKDF (siehe 01-datenmodell, Konventionen)
 - [ ] Erste Migration: Extensions `citext`, Enum `content_state`
 - [ ] Axum-Server mit `/health` (prüft DB-Verbindung) und einer Startseite über Askama
 - [ ] Basis-Layout-Template, htmx 4 als gepinnte, vendorte Datei unter `static/`
 - [ ] fluent-Setup mit `de` und `en`, Sprache aus User-Einstellung → `Accept-Language` → `de`
 - [ ] `tracing` mit JSON-Ausgabe in Produktion, lesbarer Ausgabe in Entwicklung
 - [ ] Security-Header-Middleware: CSP ohne `unsafe-inline`, `X-Content-Type-Options`,
-      `Referrer-Policy`
-- [ ] CLI-Struktur: `neoforo serve`, `neoforo migrate`
+      `Referrer-Policy`, `Permissions-Policy`
+- [ ] CLI-Struktur: `neoforo serve [--role all|web|worker]`, `neoforo migrate`,
+      `neoforo doctor` (siehe E12; in Phase 0: Config, Secret, DB, Migrationsstand)
+- [ ] Metriken im Prometheus-Format auf eigenem Listener (`NEOFORO_METRICS_ADDR`), zunächst
+      HTTP-Requests, Latenzen und DB-Pool
 - [ ] GitHub Actions: fmt, clippy `-D warnings`, Tests mit Postgres-Service,
       `cargo sqlx prepare --check`, `cargo deny check`
-- [ ] Dockerfile (Multi-Stage, Distroless oder Alpine)
+- [ ] Dockerfile (Multi-Stage, Distroless oder Alpine), inkl. `pg_dump`/`pg_restore`
 - [ ] `LICENSE` (AGPL-3.0), README mit Schnellstart
 
 **Gate:** `docker compose up -d && cargo run -- migrate && cargo run -- serve` liefert die
-Startseite in de und en aus. CI grün.
+Startseite in de und en aus. `neoforo doctor` meldet keine Fehler. `/metrics` ist nur
+auf dem internen Listener erreichbar, nicht auf dem öffentlichen Port. CI grün.
 
 ---
 
 ## Phase 1 – Accounts
 
-**Ziel:** Registrieren, Anmelden, Abmelden, inklusive Vorbereitung auf XenForo-Passwörter.
+**Ziel:** Registrieren, Anmelden, Abmelden, inklusive Vorbereitung auf XenForo-Passwörter,
+Zwei-Faktor-Anmeldung, Passkeys und Spam-Abwehr bei der Registrierung.
 
-- [ ] Migrationen: `users`, `user_profiles`, `user_fields`, `user_auth`, `user_groups`,
-      `user_group_members`, `sessions` (siehe 01-datenmodell)
+- [ ] Migrationen: `users`, `user_profiles`, `user_fields`, `user_auth`, `user_tfa`,
+      `user_recovery_codes`, `user_passkeys`, `user_groups`, `user_group_members`, `sessions`,
+      `ip_log`, `spam_log` (siehe 01-datenmodell)
 - [ ] Systemgruppen per Migration anlegen
 - [ ] Passwort-Modul in `neoforo-core`:
   - Trait für Hash-Schemata, Implementierungen `argon2id` und `xf2_bcrypt`
@@ -50,14 +58,33 @@ Startseite in de und en aus. CI grün.
       in der DB nur SHA-256 davon
 - [ ] CSRF-Schutz für alle zustandsändernden Requests (Synchronizer Token aus der Session),
       funktioniert auch bei htmx-Requests
-- [ ] Seiten: Registrierung, Login, Logout, eigenes Profil (Anzeige)
+- [ ] Seiten: Registrierung, Login, Logout, eigenes Profil (Anzeige), Sicherheitseinstellungen
+      (Passwort, zweiter Faktor, Passkeys, aktive Sessions mit Abmelden)
 - [ ] Rate-Limit für Login und Registrierung
 - [ ] E-Mail-Bestätigung über Mailpit (Versand über Job-Queue)
-- [ ] Einfache Postgres-Job-Queue (`jobs`-Tabelle, Worker mit `SKIP LOCKED`) im Binary
+- [ ] Bestätigung der Datenschutzerklärung bei der Registrierung, Version wird gespeichert
+      (Link und Version vorerst aus der Config, als `page`-Knoten ab Phase 4)
+- [ ] Spam-Abwehr bei der Registrierung (siehe E10): Honeypot, Mindestzeit über signierten
+      Zeitstempel, optionale Sperrliste für Wegwerf-Domains, Eintrag in `spam_log`
+- [ ] Zwei-Faktor-Anmeldung (siehe E11):
+  - TOTP mit verschlüsseltem Secret, Schutz gegen Wiederverwendung eines Codes
+  - Wiederherstellungscodes
+  - Passkeys (WebAuthn) als zweiter Faktor und als passwortlose Anmeldung
+  - Login in zwei Schritten: nach dem Passwort eine kurzlebige Zwischen-Session, die nur den
+    zweiten Faktor erlaubt
+  - `require_tfa` pro Gruppe: betroffene Nutzer müssen nach dem Login einen zweiten Faktor
+    einrichten, bevor sie weitermachen können
+- [ ] E-Mail-Benachrichtigung bei neuer Anmeldung und bei Änderung von Anmeldedaten
+- [ ] `ip_log`-Einträge für Registrierung und Login, Aufräum-Job für die Aufbewahrungsfrist
+- [ ] Einfache Postgres-Job-Queue (`jobs`-Tabelle, Worker mit `SKIP LOCKED`) im Binary,
+      läuft in den Rollen `all` und `worker`
 - [ ] Ersten User per CLI zum Admin machen: `neoforo user promote <name>`
+- [ ] `doctor` prüft zusätzlich den Mailversand, Metriken für die Job-Queue
 
 **Gate:** Integrationstests für Registrierung, Login (beide Hash-Schemata inklusive Rehash),
-Logout und CSRF-Ablehnung. CI grün.
+Logout und CSRF-Ablehnung, TOTP (inkl. abgelehnter Wiederverwendung), Wiederherstellungscode,
+Passkey-Registrierung und -Login (mit Software-Authenticator), Honeypot- und
+Mindestzeit-Ablehnung, Löschung abgelaufener `ip_log`-Einträge. CI grün.
 
 ---
 
@@ -67,7 +94,10 @@ Logout und CSRF-Ablehnung. CI grün.
 
 - [ ] Migrationen: `nodes`, `forums`, `threads`, `posts`, `polls`, `poll_responses`,
       `poll_votes`, `bb_codes`, `attachment_data`, `attachments`
-- [ ] Storage-Trait mit Backends `fs` (Standard) und `s3`, Auswahl über die Config
+- [ ] Storage-Trait mit Backends `fs` (Standard) und `s3`, Auswahl über die Config,
+      `doctor` prüft den Storage
+- [ ] `neoforo backup` und `neoforo restore [--verify]` (siehe E12), geplante Backups als Job
+      mit Aufbewahrungsregel, Metrik und `doctor`-Warnung zum Alter des letzten Backups
 - [ ] Seed-Befehl `neoforo dev seed` mit realistischen Fake-Daten (Baum mit Kategorien und
       Foren, mehrere tausend Threads, einige Threads mit > 1000 Posts, BBCode in allen Varianten,
       alle Thread-Typen inkl. Umfragen, eigene BBCodes, Signaturen)
@@ -109,7 +139,8 @@ Logout und CSRF-Ablehnung. CI grün.
 
 **Gate:** Snapshot- und XSS-Tests grün, Fuzzer läuft 10 Minuten ohne Fund, Thread-Seite mit
 warmem Cache < 20 ms. Test belegt, dass der Render-Cache keine betrachterabhängigen
-Inhalte enthält. SSRF-Tests für den Bild-Proxy grün. CI grün.
+Inhalte enthält. SSRF-Tests für den Bild-Proxy grün. Ein Backup der Seed-Daten lässt sich mit
+`restore --verify` wiederherstellen, Zeilenzahlen und Prüfsummen stimmen. CI grün.
 
 ---
 
@@ -120,10 +151,12 @@ Inhalte enthält. SSRF-Tests für den Bild-Proxy grün. CI grün.
   finalen Delta-Import und Link-Prüfung alter URLs im Bericht (siehe Migrationsanforderungen).
 - **Phase 4 – Schreiben, Rechte, Moderation:** Editor (Tiptap → BBCode), Antworten, neue
   Threads, Rechtemodell (E4), Melden, Löschen, Verschieben, Bans, Audit-Log.
-  Spam-Abwehr ist Voraussetzung für öffentliches Schreiben: Honeypot und Zeitprüfung bei der
-  Registrierung, Moderation der ersten Beiträge neuer Nutzer, Link-Limit für neue Nutzer,
-  Spam-Bereinigung (Nutzer und Inhalte in einem Schritt). DSGVO: Datenexport und
-  Kontolöschung mit Anonymisierung.
+  Spam-Abwehr für Inhalte ist Voraussetzung für öffentliches Schreiben (siehe E10):
+  Moderation der ersten Beiträge neuer Nutzer, Link- und Bild-Sperre bis zur Schwelle,
+  `spam_rules`, Spam-Bereinigung mit Rückgängigmachen, `ip_log` für Beiträge, optionale
+  Proof-of-Work-Prüfung und optionale externe Prüfdienste (beide standardmäßig aus).
+  Datenschutz (siehe E9): Datenexport, Kontolöschung mit Trennung der Inhalte, Rechtstexte
+  als `page`-Knoten.
 - **Phase 5 – Suche:** Postgres-Volltextsuche.
-- Danach: Benachrichtigungen (SSE), Anhänge hochladen, Unterhaltungen, Reaktionen, Präfixe,
-  Plugins (WASM).
+- Danach: Benachrichtigungen (SSE), Anhänge und Avatare hochladen (Neukodierung ohne
+  Metadaten, siehe E9), Unterhaltungen, Reaktionen, Präfixe, Plugins (WASM).

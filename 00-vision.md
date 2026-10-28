@@ -19,8 +19,10 @@ betreiben ist und eine ganze Klasse von Sicherheitslücken gar nicht erst haben 
 3. **Schnell und SEO-freundlich:** serverseitig gerendertes HTML, Grundfunktionen ohne
    JavaScript, saubere kanonische URLs.
 4. **Sicher by default:** Memory Safety durch Rust, BBCode als Whitelist-Format, strikte CSP,
-   argon2id.
-5. **Zweisprachig ab Start:** Deutsch und Englisch.
+   argon2id, Zwei-Faktor-Anmeldung und Passkeys, Spam-Abwehr ab Werk.
+5. **Datenschutz by default:** DSGVO-konform ohne Zusatz-Plugins: keine Drittanbieter-Requests,
+   keine Tracking-Cookies, Datensparsamkeit, Export und Löschung per Klick.
+6. **Zweisprachig ab Start:** Deutsch und Englisch.
 
 ## Nicht-Ziele (vorerst)
 
@@ -105,6 +107,98 @@ Beim Lesen eines Forums lädt der Browser nur Ressourcen von der eigenen Instanz
 passt zur strikten CSP). Externe Bilder aus `[img]` laufen über einen eingebauten
 Bild-Proxy mit HMAC-signierten URLs. Eingebettete Medien aus `[media]` (YouTube usw.) werden
 als Platzhalter gerendert und erst nach Klick geladen (2-Klick-Lösung).
+
+### E9 – Datensparsamkeit und Betroffenenrechte
+- **Cookies:** nur technisch notwendige (Session, CSRF, Sprache). Kein Tracking, keine
+  Analyse-Skripte von Dritten. Damit ist kein Cookie-Banner nötig.
+- **IP-Adressen:** nie an Inhalten, sondern im `ip_log` mit Aufbewahrungsfrist (Standard
+  30 Tage, konfigurierbar). Ein Job löscht abgelaufene Einträge. Sessions speichern keine IP.
+- **Uploads:** Bilder (Anhänge, Avatare) werden serverseitig neu kodiert. Dabei werden alle
+  Metadaten (EXIF inkl. GPS, XMP, IPTC) entfernt, die Ausrichtung aus EXIF wird vorher
+  angewendet. Das Original wird nicht gespeichert.
+- **Datenexport (Art. 15/20):** Jeder Nutzer kann im Konto einen Export anfordern. Ein Job
+  erzeugt ein ZIP mit maschinenlesbarem JSON (Konto, Profil, eigene Inhalte, Reaktionen,
+  Sessions, IP-Log-Einträge, später Unterhaltungen) und den eigenen Dateien. Download über
+  einen signierten Link, der nach 7 Tagen verfällt, Benachrichtigung per E-Mail.
+- **Kontolöschung (Art. 17):** vom Nutzer selbst auslösbar (Bestätigung mit Passwort bzw.
+  Passkey) oder durch Admins. Gelöscht werden Konto, Profil, Anmeldedaten, Sessions,
+  Zwei-Faktor-Daten, Passkeys, IP-Log, Avatar und Exporte. Eigene Beiträge bleiben im
+  Forum erhalten, die Verknüpfung zum Konto wird getrennt (`user_id = NULL`). Der
+  gespeicherte Autorenname bleibt entweder erhalten oder wird durch „Gelöschter Nutzer
+  {id}“ ersetzt. Das entscheidet der Admin global. Zitate in Beiträgen anderer werden nicht
+  verändert.
+- **Rechtstexte:** Impressum und Datenschutzerklärung sind Knoten vom Typ `page` (bis dahin
+  konfigurierte URLs) und werden im Footer verlinkt. Die Datenschutzerklärung muss bei der
+  Registrierung bestätigt werden. Die Version wird gespeichert.
+
+### E10 – Spam-Abwehr ohne Drittanbieter
+Spam-Abwehr ist eingebaut und standardmäßig aktiv. Sie funktioniert ohne externe Dienste;
+CAPTCHAs von Drittanbietern (reCAPTCHA, hCaptcha) gibt es nicht.
+
+- **Registrierung:** Honeypot-Feld, Mindestzeit zwischen Formularaufruf und Absenden
+  (signierter Zeitstempel im Formular), Rate-Limit pro IP, E-Mail-Bestätigung, optionale
+  Sperrliste für Wegwerf-E-Mail-Domains. Optional und standardmäßig aus: eine selbst
+  gehostete Proof-of-Work-Prüfung (eigenes JS, wird ohne JS durch Moderation der
+  Registrierung ersetzt).
+- **Neue Nutzer:** Bis zu einer konfigurierbaren Zahl freigegebener Beiträge (Standard: 1)
+  werden Beiträge moderiert. Bis zu einer weiteren Schwelle (Standard: 5) sind Links in
+  Beiträgen und Signatur sowie externe Bilder gesperrt bzw. werden moderiert.
+- **Inhaltsregeln:** Admin-pflegbare Regeln (Wort oder Regex) mit Aktion `moderate` oder
+  `reject`. Gilt für Beiträge, Thread-Titel, Signaturen und Profilfelder.
+- **Spam-Bereinigung:** Moderatoren entfernen einen Spammer in einem Schritt: Konto sperren,
+  alle Beiträge und eigenen Threads soft-löschen, IP-Adressen aus dem `ip_log` anzeigen.
+  Jede Bereinigung landet im Audit-Log und lässt sich innerhalb von 30 Tagen rückgängig
+  machen.
+- **Externe Prüfdienste** (z. B. StopForumSpam) sind optional und standardmäßig aus, weil
+  dabei E-Mail und IP an Dritte gehen. Sind sie aktiv, steht das in der
+  Datenschutzerklärung-Vorlage.
+- Jede Spam-Entscheidung wird im `spam_log` protokolliert (Admin-Ansicht, gleiche
+  Aufbewahrungsfrist wie das `ip_log`).
+
+### E11 – Zwei-Faktor-Anmeldung und Passkeys
+- **TOTP** (RFC 6238) als zweiter Faktor, dazu 10 Wiederherstellungscodes (nur als Hash
+  gespeichert). TOTP-Secrets aus XenForo werden übernommen, sofern lesbar (siehe
+  Migrationsanforderungen).
+- **Passkeys** (WebAuthn) sind sowohl zweiter Faktor als auch passwortlose Anmeldung. Ein
+  Nutzer kann mehrere Passkeys registrieren und benennen.
+- TOTP-Secrets werden in der Datenbank verschlüsselt gespeichert (AEAD, Schlüssel aus dem
+  Instanz-Secret abgeleitet).
+- Admins und Moderatoren können per Gruppeneinstellung zur Zwei-Faktor-Anmeldung
+  verpflichtet werden.
+- Neue Anmeldungen und Änderungen an Anmeldedaten (Passwort, E-Mail, zweiter Faktor) werden
+  per E-Mail gemeldet.
+
+### E12 – Betrieb: ein Binary, mehrere Rollen
+Betriebswerkzeuge sind Teil des Binarys, kein separates Programm.
+
+- **Rollen:** `neoforo serve --role all|web|worker`. Standard ist `all` (ein Prozess).
+  Größere Installationen starten denselben Binary getrennt als `web` (HTTP) und `worker`
+  (Job-Queue, geplante Aufgaben wie Backups und Aufräum-Jobs). Mehrere `web`-Prozesse
+  hinter einem Load-Balancer sind möglich, weil aller Zustand in Postgres liegt.
+- **`neoforo doctor`:** prüft Konfiguration, Instanz-Secret, Datenbankverbindung und
+  -version, ausstehende Migrationen, Storage (Lesen, Schreiben, Löschen), Mailversand
+  (optional Testmail), Zeitabweichung, verfügbare `pg_dump`-Version und das Alter des
+  letzten erfolgreichen Backups. Ausgabe lesbar oder als JSON, Exit-Code ≠ 0 bei Fehlern.
+  Die gleichen Prüfungen erscheinen als Admin-Seite.
+- **Metriken:** Prometheus-Format unter `/metrics` auf einem eigenen Listener
+  (`NEOFORO_METRICS_ADDR`, Standard `127.0.0.1:9100`), nie auf dem öffentlichen Port.
+  Mindestens: HTTP-Requests nach Route und Status, Latenzen, DB-Pool, Job-Queue (wartend,
+  laufend, fehlgeschlagen, Alter des ältesten Jobs), Render-Cache-Trefferquote,
+  Bild-Proxy, Spam-Entscheidungen, Zeitpunkt des letzten Backups. `/health` bleibt
+  öffentlich und minimal (`ok` oder `503`).
+- **Backup:** `neoforo backup` erzeugt ein Archiv aus Datenbank-Dump (`pg_dump`
+  Custom-Format) und Storage-Inhalt (beim `fs`-Backend die Dateien; beim `s3`-Backend
+  optional, da S3 meist eigene Versionierung hat) plus Manifest (Neoforo-Version,
+  Migrationsstand, Prüfsummen). Ziel: lokales Verzeichnis oder S3. Optional verschlüsselt
+  (age). Geplante Backups laufen als Job in der `worker`-Rolle, mit Aufbewahrungsregel
+  (Standard: 7 tägliche, 4 wöchentliche). Das Instanz-Secret ist bewusst **nicht** im
+  Backup; ohne es sind TOTP-Secrets unbrauchbar. `doctor` und die Admin-Seite weisen darauf
+  hin.
+- **Restore:** `neoforo restore <archiv>` nur bei gestopptem Server oder im Wartungsmodus.
+  Prüft Manifest und Prüfsummen, lehnt Backups neuerer Neoforo-Versionen ab, spielt Dump
+  und Dateien ein und führt danach ausstehende Migrationen aus. `--verify` stellt in eine
+  temporäre Datenbank wieder her und prüft nur, ohne die laufende Instanz zu berühren.
+- Das Docker-Image enthält `pg_dump`/`pg_restore` passend zur unterstützten Postgres-Major.
 
 ## Migrationsanforderungen (Kurzfassung)
 
