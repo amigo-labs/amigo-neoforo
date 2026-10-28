@@ -1,6 +1,6 @@
 # 01 – Datenmodell
 
-Status: lebend · Zuletzt geändert: 2026-10-28 · Gilt für Phasen 1–2
+Status: lebend · Zuletzt geändert: 2026-10-28 · Gilt für Phasen 0–2
 
 ## Konventionen
 
@@ -15,6 +15,9 @@ Status: lebend · Zuletzt geändert: 2026-10-28 · Gilt für Phasen 1–2
 - Autorennamen werden an Threads und Posts zusätzlich als `username` gespeichert, damit
   Inhalte gelöschter User lesbar bleiben (wie in XenForo).
 - Migrationen über `sqlx migrate`, niemals bestehende Migrationen ändern.
+- Migrationen sind rückwärtskompatibel zur Vorversion (Expand/Contract, siehe
+  `02-betrieb.md`): erst hinzufügen und befüllen, Entfernen oder Umbenennen frühestens eine
+  Version später.
 - Fremdschlüssel auf `users`: von Inhalten (Threads, Posts, Anhänge, …) mit
   `ON DELETE SET NULL`, damit Inhalte eine Kontolöschung überstehen (E9); von reinen
   Kontodaten (Profil, Anmeldedaten, Sessions, Passkeys, …) mit `ON DELETE CASCADE`.
@@ -22,6 +25,46 @@ Status: lebend · Zuletzt geändert: 2026-10-28 · Gilt für Phasen 1–2
   dem Instanz-Secret (`NEOFORO_SECRET_KEY`) abgeleitet ist. Gleiches gilt für HMAC-Schlüssel
   (Bild-Proxy, signierte Links, Formular-Zeitstempel). Jeder Zweck bekommt einen eigenen
   abgeleiteten Schlüssel.
+
+## Phase 0/1 – Infrastruktur
+
+### `instances` (Phase 0)
+Laufende Prozesse für Überblick und Job-Recovery (siehe `02-betrieb.md`).
+
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| id | uuid PK | Zufällig beim Prozessstart |
+| role | text | `all`, `web`, `worker` |
+| hostname | text | |
+| version | text | |
+| started_at | timestamptz | |
+| last_seen_at | timestamptz | Heartbeat alle 15 s, Einträge älter als 1 Tag werden gelöscht |
+
+### `jobs` (Phase 1)
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| id | bigint | |
+| kind | text | z. B. `send_mail`, `ip_log_cleanup`, `backup` |
+| payload | jsonb | |
+| state | enum `queued`, `running`, `done`, `failed` | |
+| dedupe_key | text null unique | Für geplante Aufgaben: Aufgabe + Zeitfenster |
+| attempts, max_attempts | int | Exponentielles Backoff zwischen Versuchen |
+| run_at | timestamptz | |
+| locked_by | uuid null → instances | `ON DELETE SET NULL` |
+| locked_at | timestamptz null | |
+| last_error | text null | |
+| created_at, finished_at | timestamptz | |
+
+Index: `(run_at) WHERE state = 'queued'`. Abholen mit `FOR UPDATE SKIP LOCKED`. Erledigte
+Jobs werden nach 7 Tagen gelöscht, fehlgeschlagene bleiben bis zur manuellen Freigabe.
+
+### `rate_limits` (Phase 1)
+`UNLOGGED`-Tabelle, damit alle Instanzen dieselben Limits sehen. Ein Verlust nach einem
+Absturz ist unkritisch.
+
+`key text` (z. B. `login:ip:203.0.113.7`), `window_start timestamptz`, `hits int`,
+PK `(key, window_start)`. Aktualisierung per `INSERT … ON CONFLICT DO UPDATE`, Aufräumen per
+Job.
 
 ## Phase 1 – Accounts
 
@@ -39,7 +82,7 @@ Status: lebend · Zuletzt geändert: 2026-10-28 · Gilt für Phasen 1–2
 | message_count | int | denormalisiert |
 | reaction_score | int | denormalisiert |
 | created_at | timestamptz | |
-| last_activity_at | timestamptz null | |
+| last_activity_at | timestamptz null | Höchstens alle 5 min aktualisiert |
 | privacy_policy_version | int null | Zuletzt bestätigte Version der Datenschutzerklärung |
 | privacy_policy_accepted_at | timestamptz null | |
 
@@ -134,7 +177,7 @@ Administrator, Moderator.
 | id_hash | bytea PK | SHA-256 des Cookie-Tokens, Token selbst wird nie gespeichert |
 | user_id | bigint null | null = Gast mit Session (CSRF) |
 | csrf_token | bytea | |
-| created_at, last_seen_at, expires_at | timestamptz | |
+| created_at, last_seen_at, expires_at | timestamptz | `last_seen_at` höchstens alle 5 min aktualisiert |
 | user_agent | text null | |
 
 ## Phase 2 – Inhalte
@@ -181,7 +224,7 @@ Typspezifische Daten für `node_type = 'forum'`.
 | discussion_type | enum `discussion`, `question`, `poll`, `article`, `suggestion` | Thread-Typen wie in XenForo 2.2+ |
 | type_data | jsonb | Typspezifisch, z. B. `{"solution_post_id": …}` bei `question` |
 | prefix_id | bigint null | Präfixe folgen in Phase 4 |
-| reply_count, view_count | int | |
+| reply_count, view_count | int | `view_count` wird aus `thread_views` übernommen |
 | first_post_id, last_post_id | bigint | |
 | last_post_at | timestamptz | |
 | last_post_user_id | bigint null | |
@@ -221,6 +264,11 @@ macht.
 
 IP-Adressen werden **nicht** an Posts gespeichert, sondern im `ip_log` mit
 Aufbewahrungsfrist (siehe E9 und Abschnitt Datenschutz und Spam).
+
+### `thread_views`
+`UNLOGGED`, nur `thread_id bigint`. Jeder Aufruf fügt eine Zeile ein, ein Job zählt minütlich
+zusammen, erhöht `threads.view_count` und leert die Tabelle. Vermeidet Schreibkonflikte auf
+viel gelesenen Threads.
 
 ### `polls`, `poll_responses`, `poll_votes`
 Für Threads mit `discussion_type = 'poll'`. Phase 2 zeigt Ergebnisse nur an, Abstimmen folgt

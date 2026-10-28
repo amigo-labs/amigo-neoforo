@@ -15,7 +15,8 @@ betreiben ist und eine ganze Klasse von Sicherheitslücken gar nicht erst haben 
 
 1. **Verlustfreie Migration von XenForo 2.2/2.3:** Passwörter funktionieren weiter, alle Links
    bleiben gültig, Inhalte inklusive Zitaten, Anhängen und eigener BBCodes bleiben erhalten.
-2. **Ein Binary + Postgres:** Betrieb ohne PHP, ohne Redis, ohne Message-Broker.
+2. **Ein Binary + Postgres:** Betrieb ohne PHP, ohne Redis, ohne Message-Broker. Klein auf
+   einem Server, groß horizontal skaliert, mit demselben Binary.
 3. **Schnell und SEO-freundlich:** serverseitig gerendertes HTML, Grundfunktionen ohne
    JavaScript, saubere kanonische URLs.
 4. **Sicher by default:** Memory Safety durch Rust, BBCode als Whitelist-Format, strikte CSP,
@@ -199,10 +200,20 @@ Betriebswerkzeuge sind Teil des Binarys, kein separates Programm.
   und Dateien ein und führt danach ausstehende Migrationen aus. `--verify` stellt in eine
   temporäre Datenbank wieder her und prüft nur, ohne die laufende Instanz zu berühren.
 - Das Docker-Image enthält `pg_dump`/`pg_restore` passend zur unterstützten Postgres-Major.
+- Konfiguration, CLI-Referenz und Hosting-Varianten: `02-betrieb.md`.
+
+### E13 – Horizontal skalierbar
+Die `web`-Rolle ist zustandslos und lässt sich beliebig oft hinter einem Load Balancer
+starten, ohne Sticky Sessions. Mehrere `worker` sind möglich; geplante Aufgaben laufen
+trotzdem genau einmal. Postgres ist die einzige Quelle für geteilten Zustand und
+Prozess-Kommunikation (`LISTEN/NOTIFY`), Dateien liegen dann im S3-Storage. Updates laufen
+als Rolling Update ohne Downtime, deshalb sind Migrationen rückwärtskompatibel zur
+Vorversion. Die verbindlichen Regeln für den Code stehen in `02-betrieb.md`
+(Skalierungsregeln).
 
 ## Migrationsanforderungen (Kurzfassung)
 
-Ausführlich in einer eigenen Spec vor Phase 3.
+Ausführlich in einer eigenen Spec (`03-xenforo-import.md`) vor Phase 3.
 
 - Quelle: MySQL-Datenbank von XenForo direkt + Dateisystem (`internal_data/attachments`,
   `data/avatars`). Nicht die REST-API.
