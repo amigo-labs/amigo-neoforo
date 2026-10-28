@@ -14,7 +14,8 @@ Commits nach Conventional Commits. Code und Bezeichner Englisch, UI-Texte über 
   - `crates/neoforo-core` (Library, keine IO-Abhängigkeiten)
   - `crates/neoforo-db` (Library, sqlx)
   - `crates/neoforo` (Binary)
-- [ ] `compose.yaml`: Postgres (aktuelle Major), MinIO, Mailpit
+- [ ] `compose.yaml`: Postgres (aktuelle Major), Mailpit, MinIO (nur zum Testen des
+      S3-Backends; Standard ist lokaler Storage)
 - [ ] Konfiguration über Umgebungsvariablen mit typisierter Config-Struct, `.env.example`
 - [ ] Erste Migration: Extensions `citext`, Enum `content_state`
 - [ ] Axum-Server mit `/health` (prüft DB-Verbindung) und einer Startseite über Askama
@@ -38,8 +39,8 @@ Startseite in de und en aus. CI grün.
 
 **Ziel:** Registrieren, Anmelden, Abmelden, inklusive Vorbereitung auf XenForo-Passwörter.
 
-- [ ] Migrationen: `users`, `user_auth`, `user_groups`, `user_group_members`, `sessions`
-      (siehe 01-datenmodell)
+- [ ] Migrationen: `users`, `user_profiles`, `user_fields`, `user_auth`, `user_groups`,
+      `user_group_members`, `sessions` (siehe 01-datenmodell)
 - [ ] Systemgruppen per Migration anlegen
 - [ ] Passwort-Modul in `neoforo-core`:
   - Trait für Hash-Schemata, Implementierungen `argon2id` und `xf2_bcrypt`
@@ -64,9 +65,12 @@ Logout und CSRF-Ablehnung. CI grün.
 
 **Ziel:** Ein mit Testdaten gefülltes Forum lässt sich vollständig lesen, im XenForo-URL-Schema.
 
-- [ ] Migrationen: `nodes`, `forums`, `threads`, `posts`, `attachment_data`, `attachments`
+- [ ] Migrationen: `nodes`, `forums`, `threads`, `posts`, `polls`, `poll_responses`,
+      `poll_votes`, `bb_codes`, `attachment_data`, `attachments`
+- [ ] Storage-Trait mit Backends `fs` (Standard) und `s3`, Auswahl über die Config
 - [ ] Seed-Befehl `neoforo dev seed` mit realistischen Fake-Daten (Baum mit Kategorien und
-      Foren, mehrere tausend Threads, einige Threads mit > 1000 Posts, BBCode in allen Varianten)
+      Foren, mehrere tausend Threads, einige Threads mit > 1000 Posts, BBCode in allen Varianten,
+      alle Thread-Typen inkl. Umfragen, eigene BBCodes, Signaturen)
 - [ ] BBCode in `neoforo-core`:
   - Parser zu einem AST, tolerant gegenüber kaputtem Markup (nicht geschlossene Tags bleiben
     Text)
@@ -76,9 +80,19 @@ Logout und CSRF-Ablehnung. CI grün.
     right`, `indent`, `spoiler`, `ispoiler`, `table tr th td`, `media` (Whitelist an
     Anbietern), `attach`, `user`, `plain`, `hr`
   - Unbekannte Tags werden als Text ausgegeben, nicht verworfen
+  - Eigene BBCodes aus `bb_codes` über Ersetzungs-Templates, Template-Prüfung beim Speichern
+    (siehe E1)
+  - `img` mit externer URL über den Bild-Proxy, `media` als 2-Klick-Platzhalter (siehe E8)
   - Tests: Snapshot-Tests pro Tag, XSS-Testsuite (`javascript:`-URLs, Attribut-Ausbrüche,
-    verschachtelte Tags), Fuzzing mit `cargo fuzz` für den Parser
-- [ ] Render-Cache mit `render_version`
+    verschachtelte Tags, eigene BBCodes mit bösartigen Optionen), Fuzzing mit `cargo fuzz`
+    für den Parser
+- [ ] Render-Cache mit `render_version`, nur betrachterunabhängiges HTML, Platzhalter für
+      Anhänge und externe Bilder werden pro Request ersetzt
+- [ ] Bild-Proxy `/proxy/image` mit HMAC-signierten URLs: nur `http`/`https`, keine
+      privaten/internen Zieladressen (SSRF), Größen- und Zeitlimit, nur Bild-MIME-Types,
+      Zwischenspeicher im Storage
+- [ ] Thread-Ansicht je Thread-Typ: Umfrageergebnisse, markierte Lösung bei `question`,
+      Signaturen unter Posts
 - [ ] Routen und Seiten:
   - `/` – Knotenübersicht
   - `/forums/{slug}.{id}/` mit Pagination (`page-{n}`)
@@ -87,20 +101,29 @@ Logout und CSRF-Ablehnung. CI grün.
   - `/members/{name}.{id}/`
   - Falscher Slug → 301 auf kanonische URL
   - `/index.php?…` → 301 auf die entsprechende neue URL
+  - Weitere XenForo-URLs nach E3 (`/attachments/…`, `/goto/post`, `…/post-{id}`, RSS),
+    bewusst nicht unterstützte → 410
 - [ ] Breadcrumbs über `nodes.path`
 - [ ] Alle Seiten ohne JavaScript benutzbar
+- [ ] Keine Requests an Dritte beim Lesen (siehe E8), per CSP erzwungen
 
 **Gate:** Snapshot- und XSS-Tests grün, Fuzzer läuft 10 Minuten ohne Fund, Thread-Seite mit
-warmem Cache < 20 ms. CI grün.
+warmem Cache < 20 ms. Test belegt, dass der Render-Cache keine betrachterabhängigen
+Inhalte enthält. SSRF-Tests für den Bild-Proxy grün. CI grün.
 
 ---
 
 ## Ausblick (noch nicht detailliert)
 
 - **Phase 3 – Importer v1:** eigene Spec `02-xenforo-import.md` vorher.
-  Voraussetzung: echte XenForo-Testinstallation mit Daten.
+  Voraussetzung: echte XenForo-Testinstallation mit Daten. Enthält Wartungsmodus für den
+  finalen Delta-Import und Link-Prüfung alter URLs im Bericht (siehe Migrationsanforderungen).
 - **Phase 4 – Schreiben, Rechte, Moderation:** Editor (Tiptap → BBCode), Antworten, neue
   Threads, Rechtemodell (E4), Melden, Löschen, Verschieben, Bans, Audit-Log.
+  Spam-Abwehr ist Voraussetzung für öffentliches Schreiben: Honeypot und Zeitprüfung bei der
+  Registrierung, Moderation der ersten Beiträge neuer Nutzer, Link-Limit für neue Nutzer,
+  Spam-Bereinigung (Nutzer und Inhalte in einem Schritt). DSGVO: Datenexport und
+  Kontolöschung mit Anonymisierung.
 - **Phase 5 – Suche:** Postgres-Volltextsuche.
 - Danach: Benachrichtigungen (SSE), Anhänge hochladen, Unterhaltungen, Reaktionen, Präfixe,
   Plugins (WASM).

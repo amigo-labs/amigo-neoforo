@@ -36,6 +36,34 @@ Status: lebend · Zuletzt geändert: 2026-10-28 · Gilt für Phasen 1–2
 
 Sperren (Bans) kommen in Phase 4 als eigene Tabelle, nicht als Flag am User.
 
+### `user_profiles`
+Profildaten 1:1 zu `users`, getrennt, damit Listen und Post-Ansichten nur das Nötige laden.
+
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| user_id | bigint PK → users | |
+| signature | text | BBCode, eigener Render-Cache wie bei Posts |
+| signature_render_cache | text null | |
+| signature_render_version | int | wie `posts.render_version` |
+| about | text | BBCode |
+| location | text | |
+| website | text | |
+| avatar_key | text null | Storage-Schlüssel, null = Standardavatar |
+| avatar_updated_at | timestamptz null | Für Cache-Busting in der URL |
+| custom_fields | jsonb | Werte eigener Profilfelder: `{feld_id: wert}` |
+
+### `user_fields`
+Definitionen eigener Profilfelder (aus XenForo übernommen).
+
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| id | text PK | Feld-ID wie in XenForo |
+| title | text | |
+| field_type | text | `textbox`, `textarea`, `select`, `radio`, `checkbox`, … |
+| choices | jsonb null | Auswahlwerte |
+| display_order | int | |
+| viewable_profile | bool | |
+
 ### `user_auth`
 Getrennt von `users`, damit Hashes nie versehentlich mitgeladen werden.
 
@@ -113,6 +141,8 @@ Typspezifische Daten für `node_type = 'forum'`.
 | user_id | bigint null → users | |
 | username | text | |
 | title | text | Slug wird beim Rendern abgeleitet, nicht gespeichert |
+| discussion_type | enum `discussion`, `question`, `poll`, `article`, `suggestion` | Thread-Typen wie in XenForo 2.2+ |
+| type_data | jsonb | Typspezifisch, z. B. `{"solution_post_id": …}` bei `question` |
 | prefix_id | bigint null | Präfixe folgen in Phase 4 |
 | reply_count, view_count | int | |
 | first_post_id, last_post_id | bigint | |
@@ -145,6 +175,42 @@ Index: `(node_id, sticky DESC, last_post_at DESC)` für Forenlisten.
 | reaction_score | int | |
 
 Index: `(thread_id, position)`. Pagination läuft über `position`, nicht über `OFFSET`.
+
+`render_cache` enthält nur HTML, das für alle Betrachter gleich ist (siehe E1).
+Betrachterabhängige Stellen, in Phase 2 die Anhänge, stehen darin als Platzhalter-Elemente
+mit ID und werden pro Request ersetzt. Externe Bild-URLs werden erst beim Ausliefern auf den
+Bild-Proxy umgeschrieben, damit ein Wechsel des Proxy-Schlüssels den Cache nicht ungültig
+macht.
+
+### `polls`, `poll_responses`, `poll_votes`
+Für Threads mit `discussion_type = 'poll'`. Phase 2 zeigt Ergebnisse nur an, Abstimmen folgt
+in Phase 4.
+
+`polls`: `thread_id bigint PK → threads`, `question text`, `max_votes int` (0 = unbegrenzt),
+`public_votes bool`, `change_vote bool`, `view_results_unvoted bool`, `close_at timestamptz null`,
+`voter_count int`
+
+`poll_responses`: `id`, `thread_id → polls`, `response text`, `display_order int`,
+`vote_count int`
+
+`poll_votes`: `(response_id, user_id)` als PK, `voted_at timestamptz`
+
+### `bb_codes`
+Eigene BBCodes (siehe E1). Werden vom Renderer beim Start geladen. Eine Änderung zählt
+`render_version` hoch.
+
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| tag | text PK | Kleingeschrieben, darf kein eingebautes Tag überschreiben |
+| title | text | |
+| template | text | HTML mit `{text}` und `{option}`, Werte werden escaped eingesetzt |
+| has_option | enum `no`, `optional`, `required` | |
+| option_regex | text null | Validierung der Option, sonst wird das Tag als Text ausgegeben |
+| allow_nested | bool | Ob innerhalb des Tags weiter geparst wird |
+| active | bool | |
+
+Das Template wird beim Speichern gegen eine HTML-Whitelist geprüft (keine `script`-Tags,
+keine Event-Attribute, keine `style`-Attribute, URLs nur `http`/`https`).
 
 IP-Adressen werden **nicht** an Posts gespeichert, sondern in einer eigenen Tabelle mit
 Aufbewahrungsfrist (Phase 4, DSGVO).
@@ -179,5 +245,7 @@ Bereits jetzt festgelegt, damit das Schema dazu passt:
 
 ## Offen
 
-- Präfixe, Tags, Lesemarkierungen, Abos, Benachrichtigungen, Unterhaltungen, Profilposts,
-  Reaktionstypen: eigene Spec-Abschnitte vor der jeweiligen Phase.
+- Präfixe, Tags, Lesemarkierungen, Abos, Ignorierlisten, Benachrichtigungen, Unterhaltungen,
+  Profilposts, Reaktionstypen, Votes für `suggestion`-Threads, Zwei-Faktor-Daten, verknüpfte
+  Konten: eigene Spec-Abschnitte vor der jeweiligen Phase. Der Importer muss diese Daten
+  übernehmen können (siehe Migrationsanforderungen in 00-vision).
