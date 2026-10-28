@@ -304,12 +304,18 @@ keine Event-Attribute, keine `style`-Attribute, URLs nur `http`/`https`).
 Dedupliziert über den Inhalts-Hash.
 
 `attachment_data`: `id`, `sha256 bytea unique`, `file_size`, `mime_type`, `width`, `height`,
-`storage_key`, `created_at`
+`storage_key`, `variants jsonb` (Storage-Schlüssel der Vorschaubilder nach Größe),
+`created_at`
 
-`attachments`: `id`, `data_id → attachment_data`, `post_id → posts null`, `user_id`,
-`filename`, `view_count`, `created_at`
+`attachments`: `id`, `data_id → attachment_data`, `content_type text null` (`post`,
+`conversation_message`), `content_id bigint null` (null = Upload noch keinem Inhalt
+zugeordnet), `upload_key uuid null` (ordnet Uploads einem Entwurf zu, bevor der Inhalt
+existiert), `user_id null → users (ON DELETE SET NULL)`, `filename`, `view_count`,
+`created_at`. Index auf `(content_type, content_id)`.
 
-Phase 2 zeigt importierbare Anhänge nur an. Upload folgt in Phase 4.
+Wie in XenForo ein generisches Inhaltspaar statt einer festen `post_id`, damit Anhänge auch
+an Unterhaltungsnachrichten hängen können. Phase 2 zeigt importierte Anhänge nur an. Upload
+folgt in Phase 4 (E19).
 
 ## Rechte (Struktur, Umsetzung Phase 4)
 
@@ -421,6 +427,53 @@ Einträge ohne Heartbeat seit 90 s gelten als abwesend.
 CASCADE)`, `muted_by bigint null → users`, `reason text`, `expires_at timestamptz null`,
 `created_at`
 
+## Unterhaltungen (Struktur)
+
+Tabellen ab Phase 3 (Import), Oberfläche ab Phase 6 (E18). Aufbau wie in XenForo, damit der
+Import 1:1 möglich ist (E2).
+
+### `conversations`
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| id | bigint | XenForo-ID beim Import |
+| title | text | Leer erlaubt bei zwei Teilnehmern |
+| user_id | bigint null → users | Starter, `ON DELETE SET NULL` |
+| username | text | |
+| open_invite | bool | Teilnehmer dürfen einladen |
+| conversation_open | bool | Antworten erlaubt |
+| recipient_count, reply_count | int | |
+| first_message_id, last_message_id | bigint | |
+| last_message_at | timestamptz | |
+| last_message_user_id | bigint null | |
+| last_message_username | text | |
+| created_at | timestamptz | |
+
+### `conversation_recipients`
+`(conversation_id, user_id)` als PK, `state` enum `active`/`left`/`left_permanently`,
+`last_read_message_id bigint null`, `last_read_at timestamptz null`, `starred bool`,
+`view_mode` enum `thread`/`chat` null (null = Nutzer-Standard), `joined_at`.
+Index: `(user_id, state)` für die Liste der eigenen Unterhaltungen; die Sortierung nach
+`conversations.last_message_at` läuft über einen Join.
+
+### `conversation_messages`
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| id | bigint | Dient auch als SSE-Event-ID |
+| conversation_id | bigint → conversations | `ON DELETE CASCADE` |
+| user_id | bigint null → users | `ON DELETE SET NULL` |
+| username | text | |
+| message | text | BBCode |
+| render_cache | text null | |
+| render_version | int | |
+| created_at | timestamptz | |
+| edited_at | timestamptz null | |
+
+Index: `(conversation_id, id)`. Pagination in der Thread-Ansicht über `id`, nicht über
+`OFFSET`.
+
+`users` erhält dazu `allow_conversations_from` enum `members`/`followed`/`none` und
+`show_read_receipts bool`.
+
 ## Import-Infrastruktur (Phase 3)
 
 - `import_runs`: `id`, `source`, `started_at`, `finished_at`, `stats jsonb`, `report jsonb`
@@ -429,6 +482,7 @@ CASCADE)`, `muted_by bigint null → users`, `reason text`, `expires_at timestam
 
 ## Offen
 
-- Präfixe, Tags, Lesemarkierungen, Abos, Ignorierlisten, Benachrichtigungen, Unterhaltungen,
+- Präfixe, Tags, Lesemarkierungen, Abos, Ignorierlisten, Folgen, Benachrichtigungen,
   Profilposts, Reaktionstypen, Votes für `suggestion`-Threads, verknüpfte Konten: eigene
-  Spec-Abschnitte vor der jeweiligen Phase. Der Importer muss diese Daten übernehmen können (siehe Migrationsanforderungen in 00-vision).
+  Spec-Abschnitte vor der jeweiligen Phase. Der Importer muss diese Daten übernehmen
+  können (siehe Migrationsanforderungen in 00-vision).

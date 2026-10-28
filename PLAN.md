@@ -175,6 +175,7 @@ enthält keine für Gäste unsichtbaren Inhalte. CI grün.
 - **Phase 3 – Importer v1:** eigene Spec `03-xenforo-import.md` vorher.
   Voraussetzung: echte XenForo-Testinstallation mit Daten. Enthält Wartungsmodus für den
   finalen Delta-Import und Link-Prüfung alter URLs im Bericht (siehe Migrationsanforderungen).
+  Legt die Tabellen für Unterhaltungen an und importiert sie (Oberfläche folgt in Phase 6).
 - **Phase 4 – Schreiben, Rechte, Moderation:** Editor (Tiptap → BBCode), Antworten, neue
   Threads, Rechtemodell (E4), Melden, Löschen, Verschieben, Bans, Audit-Log.
   Spam-Abwehr für Inhalte ist Voraussetzung für öffentliches Schreiben (siehe E10):
@@ -183,15 +184,20 @@ enthält keine für Gäste unsichtbaren Inhalte. CI grün.
   Proof-of-Work-Prüfung und optionale externe Prüfdienste (beide standardmäßig aus).
   Datenschutz (siehe E9): Datenexport, Kontolöschung mit Trennung der Inhalte, Rechtstexte
   als `page`-Knoten.
+  Anhänge und Avatare hochladen nach E19: Upload im Editor und ohne JS, Prüfung per Magic
+  Bytes, Neukodierung ohne Metadaten, WebP-Vorschaubilder per Job, Grenzen pro Gruppe,
+  Aufräumen verwaister Uploads, optional ClamAV. Gate u. a.: Testbilder mit GPS-EXIF
+  kommen ohne Metadaten an, als Bild getarnte Dateien werden abgelehnt.
 - **Phase 5 – Suche:** Postgres-Volltextsuche.
-- **Phase 6 – Echtzeit und Kommunikation:** Benachrichtigungen (SSE), Unterhaltungen mit
-  Live-Aktualisierung, Chat nach E17 (Räume als Knoten, SSE über `LISTEN/NOTIFY`,
+- **Phase 6 – Echtzeit und Kommunikation:** Benachrichtigungen (SSE), private
+  Unterhaltungen nach E18 (Thread- und Chat-Ansicht, live per SSE, Lesebestätigungen,
+  Privatsphäre-Einstellungen, Melden mit Kontext, E-Mail bei Abwesenheit), Chat nach E17 (Räume als Knoten, SSE über `LISTEN/NOTIFY`,
   Anwesenheit, Stummschalten, Aufbewahrungsfrist). Gate u. a.: Nachricht erreicht Clients
   auf einer anderen `web`-Instanz, verpasste Nachrichten kommen nach Reconnect an,
-  Lasttest mit vielen gleichzeitigen SSE-Verbindungen.
+  Nicht-Teilnehmer (auch Moderatoren) erhalten keine Unterhaltungsinhalte, Lasttest mit
+  vielen gleichzeitigen SSE-Verbindungen.
 - **Phase 7 – Erweiterbarkeit und Gestaltung:** Webhooks nach E16 (inkl. Signatur nach
   Standard Webhooks, Outbox über die Job-Queue, SSRF-Schutz, Protokoll), Theme-Verwaltung
   nach E15 (Editor für Tokens, eigenes CSS, Assets, Vererbung, Import/Export als ZIP,
   Layout-Slots), optional IndexNow.
-- Danach: Anhänge und Avatare hochladen (Neukodierung ohne Metadaten, siehe E9),
-  Reaktionen, Präfixe, Plugins (WASM).
+- Danach: Reaktionen, Präfixe, Plugins (WASM).

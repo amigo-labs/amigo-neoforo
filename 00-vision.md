@@ -119,7 +119,7 @@ als Platzhalter gerendert und erst nach Klick geladen (2-Klick-Lösung).
   angewendet. Das Original wird nicht gespeichert.
 - **Datenexport (Art. 15/20):** Jeder Nutzer kann im Konto einen Export anfordern. Ein Job
   erzeugt ein ZIP mit maschinenlesbarem JSON (Konto, Profil, eigene Inhalte, Reaktionen,
-  Sessions, IP-Log-Einträge, später Unterhaltungen) und den eigenen Dateien. Download über
+  Sessions, IP-Log-Einträge, Unterhaltungen, Chatnachrichten) und den eigenen Dateien. Download über
   einen signierten Link, der nach 7 Tagen verfällt, Benachrichtigung per E-Mail.
 - **Kontolöschung (Art. 17):** vom Nutzer selbst auslösbar (Bestätigung mit Passwort bzw.
   Passkey) oder durch Admins. Gelöscht werden Konto, Profil, Anmeldedaten, Sessions,
@@ -288,15 +288,15 @@ Webhooks sind die erste und wichtigste Integrationsschnittstelle, vor Plugins.
   einsehbar, einzelne Zustellungen erneut auslösbar, Test-Ereignis per Knopfdruck.
 
 ### E17 – Chat
-Echtzeit-Chat in Räumen, ergänzend zu Threads (dauerhaft, durchsuchbar) und Unterhaltungen
-(privat, asynchron).
+Öffentlicher Echtzeit-Chat in Räumen, ergänzend zu Threads (dauerhaft, durchsuchbar).
+Private Chats sind Unterhaltungen (E18) und nutzen dieselbe Echtzeit-Technik.
 
 - **Räume sind Knoten** vom Typ `chat`. Damit gelten Baum, Breadcrumbs und das Rechtemodell
   (E4) unverändert, z. B. ein Raum nur für Moderatoren über Knotenrechte. Rechte:
   `chat.view`, `chat.post`, `chat.moderate`.
 - **Nachrichten** sind BBCode mit eingeschränktem Tag-Set (`b i u s`, `url`, `icode`,
-  `ispoiler`, `user`; Emojis als Unicode). Bearbeiten und Löschen der eigenen Nachricht ist kurz nach dem
-  Senden möglich (Standard: 5 Minuten).
+  `ispoiler`, `user`; Emojis als Unicode). Bearbeiten und Löschen der eigenen Nachricht ist
+  kurz nach dem Senden möglich (Standard: 5 Minuten).
 - **Echtzeit:** Senden per htmx-`POST`, Empfang per SSE. Die schreibende Instanz sendet
   `NOTIFY` mit Raum- und Nachrichten-ID (nie den Inhalt, wegen der Grenze von 8 KB pro
   Payload). Jede `web`-Instanz lädt die Nachricht einmal und verteilt sie an ihre
@@ -313,9 +313,65 @@ Echtzeit-Chat in Räumen, ergänzend zu Threads (dauerhaft, durchsuchbar) und Un
   löscht ältere Nachrichten. Chatnachrichten sind Teil von Datenexport und Kontolöschung
   (E9).
 - **SEO:** Chaträume sind `noindex` und nicht in der Sitemap.
-- **Nicht im Umfang:** Sprach- und Videochat, Datei-Uploads im Chat, Ende-zu-Ende-
-  Verschlüsselung, private 1:1-Chats (dafür gibt es Unterhaltungen, die ebenfalls live
-  aktualisiert werden).
+- **Nicht im Umfang:** Sprach- und Videochat, Datei-Uploads in Chaträumen,
+  Ende-zu-Ende-Verschlüsselung.
+
+### E18 – Private Unterhaltungen
+Ein einziges System für private Kommunikation, zu zweit oder in kleinen Gruppen. Es bildet
+XenForo-Unterhaltungen verlustfrei ab und fühlt sich gleichzeitig wie ein privater Chat an.
+Ein zweites, getrenntes Direktnachrichten-System gibt es nicht.
+
+- **Struktur wie XenForo:** Eine Unterhaltung hat einen Titel, einen Starter und Teilnehmer.
+  Nachrichten sind BBCode mit vollem Tag-Set, Zitate und Anhänge (E19) sind möglich. Für
+  Unterhaltungen zu zweit ist der Titel optional; ohne Titel wird der Name des Gegenübers
+  angezeigt.
+- **Zwei Ansichten, dieselben Daten:** eine Thread-Ansicht (paginiert, wie in XenForo) und
+  eine Chat-Ansicht (fortlaufend, neueste unten, Eingabefeld fixiert). Der Nutzer wählt,
+  die Wahl wird gespeichert. Beide funktionieren ohne JavaScript.
+- **Echtzeit:** Neue Nachrichten erscheinen live per SSE in beiden Ansichten, technisch wie
+  im Chat (E17: `NOTIFY` nur mit IDs, instanzübergreifend, Nachholen über
+  `Last-Event-ID`). Dazu Lesebestätigung pro Teilnehmer („gelesen bis“, abschaltbar in den
+  Privatsphäre-Einstellungen) und ein Zähler ungelesener Unterhaltungen im Header.
+- **Teilnehmer:** Starter und Teilnehmer mit Recht dazu können weitere einladen. Höchstzahl
+  der Teilnehmer pro Gruppe einstellbar (Standard: 10 für Registrierte). Austreten ist
+  möglich: entweder bis zur nächsten Nachricht (danach wieder dabei) oder dauerhaft, wie in
+  XenForo.
+- **Wer darf wen anschreiben:** Privatsphäre-Einstellung pro Nutzer (`alle Mitglieder`,
+  `nur Personen, denen ich folge`, `niemand`). Ignorierte Nutzer können nicht schreiben.
+  Admins und Moderatoren können immer schreiben.
+- **Spam-Abwehr (E10):** Neue Nutzer dürfen erst ab einer Schwelle (Standard: 5 freigegebene
+  Beiträge) Unterhaltungen beginnen. Rate-Limits für neue Unterhaltungen und
+  Nachrichten. Inhaltsregeln gelten auch hier.
+- **Moderation:** Moderatoren und Admins können Unterhaltungen **nicht** lesen. Gemeldete
+  Nachrichten werden mit Kontext (die gemeldete Nachricht und eine einstellbare Zahl
+  vorheriger Nachrichten) in die Meldung kopiert. Einsicht darüber hinaus gibt es nicht.
+- **Benachrichtigung:** Wer nicht online ist, bekommt eine E-Mail (abschaltbar, gebündelt
+  höchstens alle 15 Minuten pro Unterhaltung).
+- **Datenschutz (E9):** Nachrichten sind serverseitig gespeichert, nicht Ende-zu-Ende
+  verschlüsselt. Das steht in der Vorlage für die Datenschutzerklärung. Datenexport enthält
+  eigene Nachrichten und die Unterhaltungen, an denen man teilnimmt. Bei Kontolöschung
+  bleiben Nachrichten für die anderen Teilnehmer lesbar (`user_id = NULL`, Name wie bei
+  Beiträgen). Haben alle Teilnehmer eine Unterhaltung dauerhaft verlassen oder ihre Konten
+  gelöscht, wird sie per Job endgültig gelöscht.
+- **Suche:** Unterhaltungen sind nur für ihre Teilnehmer durchsuchbar.
+- **Webhooks (E16):** keine Ereignisse für Unterhaltungsinhalte.
+
+### E19 – Anhänge und Avatare
+- **Upload** im Editor per Drag-and-drop und Einfügen, ohne JavaScript über ein normales
+  Dateifeld. Anhänge sind möglich in Beiträgen und Unterhaltungen.
+- **Prüfung:** Dateityp per Inhalt (Magic Bytes), nicht per Endung; erlaubte Typen,
+  Größen- und Anzahlgrenzen pro Gruppe. Bilder werden dekodiert und neu kodiert (E9:
+  Metadaten entfernt), was nebenbei manipulierte Bilddateien entschärft. SVG ist als Bild
+  nicht erlaubt.
+- **Varianten:** Vorschaubilder in festen Größen als WebP, beim Upload per Job erzeugt.
+  Avatare werden quadratisch zugeschnitten und in festen Größen abgelegt.
+- **Deduplizierung** über den SHA-256 des gespeicherten Inhalts (`attachment_data`).
+- **Auslieferung:** immer über eine Rechteprüfung (E1: Platzhalter im Render-Cache). Nicht
+  darstellbare Typen mit `Content-Disposition: attachment`, alle mit `X-Content-Type-Options:
+  nosniff`. Beim `s3`-Backend per Redirect auf eine kurzlebige vorsignierte URL.
+- **Verwaiste Uploads** (hochgeladen, aber nie mit einem Beitrag gespeichert) werden nach
+  24 Stunden gelöscht, nicht mehr referenzierte Daten aus `attachment_data` per Job.
+- **Optional:** Virenscan über einen ClamAV-Daemon (`clamd`-Socket), standardmäßig aus.
 
 ## Migrationsanforderungen (Kurzfassung)
 
