@@ -189,7 +189,7 @@ Gemeinsame Basis aller Knoten im Baum.
 |---|---|---|
 | id | bigint | |
 | parent_id | bigint null → nodes | null = Wurzelebene |
-| node_type | enum `category`, `forum`, `link`, `page` | |
+| node_type | enum `category`, `forum`, `link`, `page`, `chat` | `chat` ab Phase 6 (E17) |
 | title | text | |
 | description | text | BBCode erlaubt |
 | display_order | int | |
@@ -358,6 +358,68 @@ für das Rückgängigmachen), `created_at`, `undone_at timestamptz null`. Rückg
 `id`, `user_id → users (ON DELETE CASCADE)`, `state` enum `pending`/`ready`/`failed`,
 `storage_key text null`, `created_at`, `expires_at`. Ein Job löscht abgelaufene Exporte
 samt Datei.
+
+## Themes, Webhooks, Chat (Struktur)
+
+Festgelegt, damit spätere Phasen ohne Umbau anschließen. Umsetzung siehe PLAN.
+
+### `themes`
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| id | bigint | |
+| parent_id | bigint null → themes | Vererbung von Tokens |
+| title | text | |
+| version | text | Aus `theme.toml` |
+| tokens_light, tokens_dark | jsonb | `{"--color-primary": "#…", …}`, nur bekannte Tokens |
+| custom_css_key | text null | Storage-Schlüssel der CSS-Datei |
+| assets | jsonb | `{"logo": key, "favicon": key, …}` |
+| is_default | bool | Genau ein Theme |
+| user_selectable | bool | |
+| updated_at | timestamptz | Für Cache-Busting |
+
+`users` erhält dazu `theme_id bigint null → themes (ON DELETE SET NULL)` und
+`color_scheme` enum `auto`, `light`, `dark`.
+
+### `webhooks`, `webhook_deliveries`
+`webhooks`: `id`, `title`, `url`, `secret_enc bytea`, `events text[]`,
+`acts_as_group_id bigint null → user_groups`, `allow_private_targets bool`, `active bool`,
+`consecutive_failures int`, `disabled_at timestamptz null`, `created_at`
+
+`webhook_deliveries`: `id`, `webhook_id → webhooks (ON DELETE CASCADE)`, `event_id uuid`,
+`event_type text`, `payload jsonb`, `attempt int`, `state` enum `pending`/`delivered`/
+`failed`, `response_status int null`, `response_excerpt text null` (max. 2 KB),
+`duration_ms int null`, `created_at`, `delivered_at timestamptz null`. Aufbewahrung
+14 Tage. Die Zustellung selbst läuft als Job (`kind = 'webhook_deliver'`).
+
+### `chat_rooms`
+Typspezifische Daten für `node_type = 'chat'`: `node_id PK → nodes`, `retention_days int`
+(0 = unbegrenzt), `edit_window_seconds int`, `slow_mode_seconds int` (Mindestabstand
+zwischen Nachrichten eines Nutzers, 0 = aus), `last_message_id bigint null`,
+`last_message_at timestamptz null`
+
+### `chat_messages`
+| Spalte | Typ | Hinweis |
+|---|---|---|
+| id | bigint | Dient auch als SSE-Event-ID |
+| room_id | bigint → chat_rooms | |
+| user_id | bigint null → users | `ON DELETE SET NULL` |
+| username | text | |
+| message | text | BBCode, eingeschränktes Tag-Set |
+| render_cache | text | |
+| message_state | content_state | |
+| created_at | timestamptz | |
+| edited_at | timestamptz null | |
+
+Index: `(room_id, id DESC)`. Kein `ip_log`-Eintrag pro Nachricht, nur pro Sitzung im Raum.
+
+### `chat_presence`
+`UNLOGGED`: `(room_id, user_id, instance_id)` als PK, `last_seen_at`. Heartbeat alle 30 s,
+Einträge ohne Heartbeat seit 90 s gelten als abwesend.
+
+### `chat_mutes`
+`id`, `room_id null → chat_rooms` (null = alle Räume), `user_id → users (ON DELETE
+CASCADE)`, `muted_by bigint null → users`, `reason text`, `expires_at timestamptz null`,
+`created_at`
 
 ## Import-Infrastruktur (Phase 3)
 

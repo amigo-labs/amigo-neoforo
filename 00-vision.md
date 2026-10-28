@@ -27,7 +27,7 @@ betreiben ist und eine ganze Klasse von Sicherheitslücken gar nicht erst haben 
 
 ## Nicht-Ziele (vorerst)
 
-- Föderation (ActivityPub), Chat, native Mobile-Apps
+- Föderation (ActivityPub), native Mobile-Apps
 - SPA-Frontend
 - Andere Datenbanken als PostgreSQL
 - Multi-Tenant/SaaS-Betrieb mehrerer Foren in einer Instanz
@@ -211,6 +211,112 @@ als Rolling Update ohne Downtime, deshalb sind Migrationen rückwärtskompatibel
 Vorversion. Die verbindlichen Regeln für den Code stehen in `02-betrieb.md`
 (Skalierungsregeln).
 
+### E14 – SEO
+Suchmaschinen sind die wichtigste Besucherquelle von Foren. Ein Umzug darf kein Ranking kosten
+(siehe E3), und neue Inhalte sollen schnell gefunden werden.
+
+- **Kanonische URLs** auf jeder Seite, jede Pagination-Seite ist selbstkanonisch. Seiten mit
+  Filter- oder Sortierparametern verweisen auf die Version ohne Parameter.
+- **`sitemap.xml`** als Index mit Teil-Sitemaps zu je höchstens 50.000 URLs (Foren, Threads
+  mit `lastmod`, öffentliche Profile mit Inhalten). Sie wird als Job erzeugt und im Storage
+  abgelegt, nicht pro Request berechnet. Enthalten ist nur, was Gäste sehen dürfen.
+- **`robots.txt`** aus einer Vorlage, im Admin-Bereich änderbar, verweist auf die Sitemap.
+- **Meta-Daten:** `<title>` und `meta description` (aus dem ersten Beitrag, BBCode
+  entfernt, ca. 160 Zeichen), OpenGraph und Twitter Cards (Vorschaubild: erstes Bild bzw.
+  Anhang des Threads, sonst Forenlogo).
+- **Strukturierte Daten (JSON-LD):** `DiscussionForumPosting` mit Kommentaren und
+  Interaktionszahlen für Threads, `BreadcrumbList`, `ProfilePage` für Profile,
+  `QAPage` für Threads vom Typ `question` mit markierter Lösung.
+- **Feeds:** RSS 2.0 und Atom pro Forum und für das gesamte Forum (auch unter den
+  XenForo-URLs aus E3).
+- **`noindex`** für Seiten ohne eigenen Inhalt: Suche, Login, Registrierung, leere Profile,
+  Mitgliederlisten.
+- **Statuscodes:** gelöschte Threads liefern Gästen 410, verschobene Threads 301 auf die neue
+  URL (Thread-ID bleibt gleich, nur das Forum ändert sich, daher genügt die kanonische
+  Weiterleitung). Moderierte Inhalte liefern Gästen 404.
+- **Performance als Ranking-Faktor:** Bilder und Anhänge haben `width`/`height` (keine
+  Layout-Verschiebung), `loading="lazy"` ab dem dritten Bild, kein render-blockierendes JS.
+- **Optional:** IndexNow-Ping bei neuen Threads (standardmäßig aus; es werden nur URLs
+  übermittelt, keine personenbezogenen Daten).
+
+### E15 – Themes
+Askama-Templates werden zur Compile-Zeit übersetzt und lassen sich zur Laufzeit nicht
+austauschen. Themes ändern deshalb das Aussehen, nicht die HTML-Struktur.
+
+- **Design-Tokens:** Das Basis-Layout nutzt ausschließlich CSS Custom Properties (Farben,
+  Schriften, Abstände, Radien, Breiten). Ein Theme ist ein Satz Token-Werte.
+- **Eigenes CSS:** pro Theme zusätzlich frei definierbares CSS, als eigene Datei mit
+  Inhalts-Hash ausgeliefert (kein Inline-CSS, CSP bleibt strikt). `url()` auf externe Hosts
+  blockiert die CSP (E8).
+- **Assets:** Logo, Favicon, App-Icons, Vorschaubild für OpenGraph, Schriften (selbst
+  gehostet) liegen im Storage.
+- **Hell und dunkel:** Jedes Theme hat Token-Sätze für hell und dunkel. Standard folgt
+  `prefers-color-scheme`, Nutzer können umschalten (Cookie bzw. Konto-Einstellung,
+  funktioniert ohne JS).
+- **Vererbung:** Ein Theme kann von einem anderen erben und nur einzelne Tokens
+  überschreiben.
+- **Auswahl:** Admins legen ein Standard-Theme fest und können weitere für Nutzer
+  freigeben.
+- **Paketformat:** ZIP mit `theme.toml` (Name, Version, Eltern-Theme, Tokens), `custom.css`
+  und Assets. Import und Export im Admin-Bereich.
+- **XenForo:** Der Importer übernimmt aus den Style-Properties des Standard-Styles Farben,
+  Logo und Favicon als Ausgangs-Theme. Templates und Less-Code werden nicht übernommen (E7).
+- Strukturelle Anpassungen (zusätzliche Blöcke in Header, Footer oder Seitenleiste) laufen
+  über Layout-Slots, die Admins mit BBCode befüllen, nicht über Template-Overrides.
+
+### E16 – Webhooks
+Webhooks sind die erste und wichtigste Integrationsschnittstelle, vor Plugins.
+
+- **Ereignisse** (Auswahl pro Webhook): `thread.created`, `thread.updated`, `thread.deleted`,
+  `post.created`, `post.updated`, `post.deleted`, `user.registered`, `user.updated`,
+  `report.created`, `moderation.queued`, `chat.message.created`. Die Liste wächst mit den
+  Funktionen.
+- **Format:** JSON mit versioniertem Schema (`"schema": 1`), Ereignis-ID, Zeitpunkt und den
+  betroffenen Objekten (inkl. kanonischer URL und gerendertem HTML bei Inhalten).
+- **Signatur:** nach der Spezifikation „Standard Webhooks“ (Header `webhook-id`,
+  `webhook-timestamp`, `webhook-signature`, HMAC-SHA256), damit Empfänger vorhandene
+  Bibliotheken nutzen können. Das Secret wird verschlüsselt gespeichert.
+- **Rechte:** Ein Webhook sieht standardmäßig nur, was Gäste sehen dürfen. Der Admin kann
+  eine Benutzergruppe wählen, deren Rechte gelten sollen (z. B. für Moderations-Ereignisse).
+- **Zustellung** über die Job-Queue: Das Ereignis wird in derselben Transaktion wie die
+  Änderung als Job angelegt (Transactional Outbox, kein Ereignis geht verloren). Timeout
+  10 s, Retry mit exponentiellem Backoff bis 24 h. Nach 50 aufeinanderfolgenden Fehlern wird
+  der Webhook deaktiviert und der Admin per E-Mail informiert.
+- **SSRF-Schutz:** nur `https` (`http` nur mit expliziter Freigabe), keine privaten oder
+  internen Zieladressen, außer der Admin erlaubt sie ausdrücklich pro Webhook.
+- **Protokoll:** Zustellungen mit Statuscode und Antwortauszug für 14 Tage, im Admin-Bereich
+  einsehbar, einzelne Zustellungen erneut auslösbar, Test-Ereignis per Knopfdruck.
+
+### E17 – Chat
+Echtzeit-Chat in Räumen, ergänzend zu Threads (dauerhaft, durchsuchbar) und Unterhaltungen
+(privat, asynchron).
+
+- **Räume sind Knoten** vom Typ `chat`. Damit gelten Baum, Breadcrumbs und das Rechtemodell
+  (E4) unverändert, z. B. ein Raum nur für Moderatoren über Knotenrechte. Rechte:
+  `chat.view`, `chat.post`, `chat.moderate`.
+- **Nachrichten** sind BBCode mit eingeschränktem Tag-Set (`b i u s`, `url`, `icode`,
+  `ispoiler`, `user`; Emojis als Unicode). Bearbeiten und Löschen der eigenen Nachricht ist kurz nach dem
+  Senden möglich (Standard: 5 Minuten).
+- **Echtzeit:** Senden per htmx-`POST`, Empfang per SSE. Die schreibende Instanz sendet
+  `NOTIFY` mit Raum- und Nachrichten-ID (nie den Inhalt, wegen der Grenze von 8 KB pro
+  Payload). Jede `web`-Instanz lädt die Nachricht einmal und verteilt sie an ihre
+  verbundenen Clients (siehe Skalierungsregeln). Nach einem Verbindungsabbruch holt der
+  Client verpasste Nachrichten über `Last-Event-ID` nach.
+- **Ohne JavaScript:** Der Raum ist eine normale Seite mit Formular, neue Nachrichten
+  erscheinen nach dem Neuladen.
+- **Anwesenheit:** Wer gerade im Raum ist, ergibt sich aus offenen SSE-Verbindungen und wird
+  instanzübergreifend in einer `UNLOGGED`-Tabelle mit Heartbeat geführt.
+- **Moderation:** Nachrichten löschen, Nutzer pro Raum oder global stummschalten (mit
+  Ablaufzeit), Melden wie bei Beiträgen. Spam-Abwehr (E10) gilt: Rate-Limit, Inhaltsregeln,
+  Link-Sperre für neue Nutzer.
+- **Datenschutz:** Aufbewahrungsfrist pro Raum (Standard 90 Tage, `0` = unbegrenzt), ein Job
+  löscht ältere Nachrichten. Chatnachrichten sind Teil von Datenexport und Kontolöschung
+  (E9).
+- **SEO:** Chaträume sind `noindex` und nicht in der Sitemap.
+- **Nicht im Umfang:** Sprach- und Videochat, Datei-Uploads im Chat, Ende-zu-Ende-
+  Verschlüsselung, private 1:1-Chats (dafür gibt es Unterhaltungen, die ebenfalls live
+  aktualisiert werden).
+
 ## Migrationsanforderungen (Kurzfassung)
 
 Ausführlich in einer eigenen Spec (`03-xenforo-import.md`) vor Phase 3.
@@ -220,6 +326,9 @@ Ausführlich in einer eigenen Spec (`03-xenforo-import.md`) vor Phase 3.
 - Reihenfolge: Gruppen → User inkl. Profilen → Knoten → Threads → Posts → Umfragen →
   Anhänge/Avatare → Reaktionen → Unterhaltungen → Nutzerzustand → Rechte.
 - Eigene BBCodes werden vor den Posts übernommen (siehe E1).
+- Farben, Logo und Favicon des Standard-Styles werden als Ausgangs-Theme übernommen (E15).
+- Daten aus Chat-Add-ons (z. B. Siropu Chat) werden im Bericht gelistet. Ein Import ist
+  vorerst nicht geplant.
 - Nutzerzustand umfasst beobachtete Threads und Foren, Ignorierlisten, Lesemarkierungen,
   Zwei-Faktor-Einstellungen und verknüpfte Konten (z. B. Google-Login). Was davon nicht
   übernommen werden kann, steht im Bericht.

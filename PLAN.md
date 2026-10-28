@@ -27,6 +27,8 @@ Commits nach Conventional Commits. Code und Bezeichner Englisch, UI-Texte über 
 - [ ] Client-IP nur über `NEOFORO_TRUSTED_PROXIES` aus `X-Forwarded-For`
 - [ ] Statische Assets mit Inhalts-Hash im Dateinamen, `Cache-Control: immutable`
 - [ ] Basis-Layout-Template, htmx 4 als gepinnte, vendorte Datei unter `static/`
+- [ ] Alle Gestaltungswerte im Basis-Layout als CSS Custom Properties (Design-Tokens, E15),
+      helle und dunkle Variante nach `prefers-color-scheme`
 - [ ] fluent-Setup mit `de` und `en`, Sprache aus User-Einstellung → `Accept-Language` → `de`
 - [ ] `tracing` mit JSON-Ausgabe in Produktion, lesbarer Ausgabe in Entwicklung
 - [ ] Security-Header-Middleware: CSP ohne `unsafe-inline`, `X-Content-Type-Options`,
@@ -152,13 +154,19 @@ CI grün.
 - [ ] Breadcrumbs über `nodes.path`
 - [ ] Alle Seiten ohne JavaScript benutzbar
 - [ ] Keine Requests an Dritte beim Lesen (siehe E8), per CSP erzwungen
+- [ ] SEO nach E14: kanonische URLs, Meta-Daten und OpenGraph, JSON-LD
+      (`DiscussionForumPosting`, `BreadcrumbList`, `ProfilePage`, `QAPage`), `sitemap.xml`
+      als Job, `robots.txt`, RSS und Atom, `noindex`-Regeln, 410 für gelöschte Threads
+- [ ] Theme-Grundlage nach E15: Tabelle `themes`, Standard-Theme aus Tokens, Umschalter
+      hell/dunkel/auto ohne JS, Tokens werden als CSS-Datei mit Inhalts-Hash ausgeliefert
 
 **Gate:** Snapshot- und XSS-Tests grün, Fuzzer läuft 10 Minuten ohne Fund, Thread-Seite mit
 warmem Cache < 20 ms. Test belegt, dass der Render-Cache keine betrachterabhängigen
 Inhalte enthält. SSRF-Tests für den Bild-Proxy grün. Ein Backup der Seed-Daten lässt sich mit
 `restore --verify` wiederherstellen, Zeilenzahlen und Prüfsummen stimmen. Eine Änderung an
 `bb_codes` wirkt auf allen Instanzen. Lasttest gegen das Profil `scale` ist dokumentiert
-(`bench/`). CI grün.
+(`bench/`). JSON-LD der Thread-Seite validiert gegen Schema.org (Snapshot-Test), Sitemap
+enthält keine für Gäste unsichtbaren Inhalte. CI grün.
 
 ---
 
@@ -176,5 +184,14 @@ Inhalte enthält. SSRF-Tests für den Bild-Proxy grün. Ein Backup der Seed-Date
   Datenschutz (siehe E9): Datenexport, Kontolöschung mit Trennung der Inhalte, Rechtstexte
   als `page`-Knoten.
 - **Phase 5 – Suche:** Postgres-Volltextsuche.
-- Danach: Benachrichtigungen (SSE), Anhänge und Avatare hochladen (Neukodierung ohne
-  Metadaten, siehe E9), Unterhaltungen, Reaktionen, Präfixe, Plugins (WASM).
+- **Phase 6 – Echtzeit und Kommunikation:** Benachrichtigungen (SSE), Unterhaltungen mit
+  Live-Aktualisierung, Chat nach E17 (Räume als Knoten, SSE über `LISTEN/NOTIFY`,
+  Anwesenheit, Stummschalten, Aufbewahrungsfrist). Gate u. a.: Nachricht erreicht Clients
+  auf einer anderen `web`-Instanz, verpasste Nachrichten kommen nach Reconnect an,
+  Lasttest mit vielen gleichzeitigen SSE-Verbindungen.
+- **Phase 7 – Erweiterbarkeit und Gestaltung:** Webhooks nach E16 (inkl. Signatur nach
+  Standard Webhooks, Outbox über die Job-Queue, SSRF-Schutz, Protokoll), Theme-Verwaltung
+  nach E15 (Editor für Tokens, eigenes CSS, Assets, Vererbung, Import/Export als ZIP,
+  Layout-Slots), optional IndexNow.
+- Danach: Anhänge und Avatare hochladen (Neukodierung ohne Metadaten, siehe E9),
+  Reaktionen, Präfixe, Plugins (WASM).
