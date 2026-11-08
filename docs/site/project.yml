@@ -1,0 +1,64 @@
+# Content for amigo-labs.dev/neoforo/ — format: https://github.com/amigo-labs/website/blob/main/docs/project-data.md
+schema: 1
+slug: neoforo
+name: amigo-neoforo
+status: planned
+accent: "#e5487f"
+tagline:
+  en: Forum software for communities moving from XenForo
+  de: Forensoftware für Communitys, die von XenForo umziehen
+summary:
+  en: >-
+    A classic forum — categories, forums, threads, posts — in Rust with PostgreSQL and htmx. It
+    should feel like XenForo to members, be simpler to run for admins, and rule out a whole class of
+    security holes from the start.
+  de: >-
+    Ein klassisches Forum – Kategorien, Foren, Threads, Beiträge – in Rust mit PostgreSQL und htmx.
+    Für Mitglieder soll es sich wie XenForo anfühlen, für Admins einfacher zu betreiben sein und eine
+    ganze Klasse von Sicherheitslücken gar nicht erst haben können.
+about:
+  en: |
+    Neoforo is aimed at operators of existing communities, above all XenForo 2.2 and 2.3 admins who
+    want to move without losing anything. It speaks German and English from the start.
+
+    The specification is written; implementation has not started yet.
+  de: |
+    Neoforo richtet sich an Betreiber bestehender Communitys, vor allem an Admins von XenForo 2.2
+    und 2.3, die ohne Verluste umziehen wollen. Es ist von Anfang an zweisprachig: Deutsch und
+    Englisch.
+
+    Die Spezifikation steht; die Umsetzung hat noch nicht begonnen.
+platforms: [docker, linux]
+license: AGPL-3.0
+
+features:
+  - title: { en: Lossless move from XenForo, de: Verlustfreier Umzug von XenForo }
+    text:
+      en: Passwords keep working, every link stays valid, and content keeps its quotes, attachments and custom BBCodes. A repeatable trial run reports anything that could not be carried over.
+      de: Passwörter funktionieren weiter, alle Links bleiben gültig, Inhalte behalten Zitate, Anhänge und eigene BBCodes. Ein wiederholbarer Probelauf meldet alles, was nicht übernommen werden konnte.
+    status: planned
+  - title: { en: One binary and PostgreSQL, de: Ein Binary und PostgreSQL }
+    text:
+      en: No PHP, no Redis, no message broker. Small on one server, or scaled out horizontally with the same binary in web and worker roles; backup, restore and health checks are built in.
+      de: Ohne PHP, ohne Redis, ohne Message-Broker. Klein auf einem Server oder horizontal skaliert mit demselben Binary in den Rollen Web und Worker; Backup, Wiederherstellung und Systemprüfung sind eingebaut.
+    status: planned
+  - title: { en: Fast and search-engine friendly, de: Schnell und suchmaschinenfreundlich }
+    text:
+      en: Server-rendered HTML, reading works without JavaScript, clean canonical URLs, sitemaps, structured data and RSS and Atom feeds.
+      de: Serverseitig gerendertes HTML, Lesen funktioniert ohne JavaScript, saubere kanonische URLs, Sitemaps, strukturierte Daten sowie RSS- und Atom-Feeds.
+    status: planned
+  - title: { en: Secure by default, de: Sicher ab Werk }
+    text:
+      en: Memory safety through Rust, BBCode as a whitelist format, a strict CSP, argon2id, two-factor sign-in and passkeys, and built-in spam protection without third-party CAPTCHAs.
+      de: Speichersicherheit durch Rust, BBCode als Whitelist-Format, eine strikte CSP, argon2id, Zwei-Faktor-Anmeldung und Passkeys sowie eingebaute Spam-Abwehr ohne CAPTCHAs von Drittanbietern.
+    status: planned
+  - title: { en: Privacy by default, de: Datenschutz ab Werk }
+    text:
+      en: GDPR-compliant without add-ons — no third-party requests, no tracking cookies, data minimisation, and data export and account deletion at a click.
+      de: DSGVO-konform ohne Zusatz-Plugins – keine Anfragen an Dritte, keine Tracking-Cookies, Datensparsamkeit sowie Datenexport und Kontolöschung per Klick.
+    status: planned
+  - title: { en: Chat and private conversations, de: Chat und private Unterhaltungen }
+    text:
+      en: Real-time chat rooms and private conversations that read as a thread or as a chat, live over server-sent events.
+      de: Chaträume in Echtzeit und private Unterhaltungen, die sich als Thread oder als Chat lesen lassen – live über Server-Sent Events.
+    status: planned
