@@ -1,9 +1,10 @@
 # Content for amigo-labs.dev/neoforo/ — format: https://github.com/amigo-labs/website/blob/main/docs/project-data.md
 schema: 1
 slug: neoforo
-name: amigo-neoforo
+name: Neoforo
 status: planned
-accent: "#e5487f"
+accent: "#f062c0"
+monogram: Nf
 tagline:
   en: Forum software for communities moving from XenForo
   de: Forensoftware für Communitys, die von XenForo umziehen
